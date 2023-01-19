@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="jp">
+
+<head>
+  <title>わしメ作文ツール</title>
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@4.5.95/css/materialdesignicons.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/vuetify@3.1.1/dist/vuetify.min.css" rel="stylesheet">
+  <link rel="icon" href="http://hennohito.cocolog-nifty.com//blog/files/washira_flag.jpeg">
+</head>
+
+<body>
+  <div id="app">
+    <v-app>
+      <v-main>
+        <v-container>
+
+          <v-row justify="center">
+              <v-select
+                label="投稿者を選ぶ"
+                prepend-icon="mdi-account-circle"
+                v-model="form_data.author"
+                :items="['6 feet rod', 'しろの', 'サナメ', '破壊 天使', 'Qリプトラベラー', 'とある小児科医', 'Mika Langford', '餡子熊おう', 'のとにゃん', 'O次郎', '43企画']"
+              ></v-select>
+              <v-btn prepend-icon="mdi-delete" size="x-large" color="#d6cadd" @click="clear">リセット</v-btn>
+
+              <v-dialog v-model="dialog">
+                <template v-slot:activator="{ props }">
+                  <v-btn color="#b0e2ff" v-bind="props" size="x-large" prepend-icon='mdi-send'>
+                    テレグラム投稿文をGet
+                  </v-btn>
+                </template>
+
+                <v-card variant="elevated">
+                  <v-card-text>
+                    <v-textarea 
+                      readonly
+                      auto-grow
+                      counter
+                      v-model="telegram_txt"
+                      ref="telegram_textarea"
+                      @click='focus_all'
+                      >
+                    </v-textarea>
+                  </v-card-text>
+                  <v-card-actions>
+                    <v-btn color="primary" block @click='dialog = false'>閉じる</v-btn>
+                  </v-card-actions>
+                </v-card>
+              </v-dialog>
+              
+          </v-row>
+     
+          <v-text-field
+            label="タイトル"
+            variant="solo"
+            auto-grow
+            v-model="form_data.title"
+            messages="タイトルで大体何が書いてあるか分かるようにお願いします。ツイッターは全角140文字、半角280文字までで、タイトル＋投稿者＋概要＋URL"
+          ></v-text-field>
+
+          <v-textarea
+            label="ツイッター最初の投稿用の概要"
+            variant="solo"
+            auto-grow
+            prepend-inner-icon="mdi-twitter"
+            rows="2"
+            v-model="form_data.abstract"
+            messages="省略すると下の内容から入り切るだけが最初のツイートになります。"
+          ></v-textarea>
+
+          <v-text-field
+            label="ツイッター最初の投稿用のURL"
+            type="url"
+            v-model="form_data.url"
+            prepend-inner-icon="mdi-twitter"
+            messages="投稿に複数のURLがある場合、最初のURLが使われますが、日本語記事など優先すべきリンクをここで指定できます。URLは長くとも半角23文字扱いになります。"
+          ></v-text-field>
+
+          <v-textarea
+            label="内容"
+            variant="solo"
+            auto-grow
+            v-model="form_data.content"
+            messages="テレグラムの投稿の通常のテキストです。全てを合計して半角で4,096まで。長い場合はツイッターではスレになります。"
+          ></v-textarea>
+          <br>
+
+          <v-row justify="center">
+            <v-chip color='cyan' >
+              <v-icon start icon="mdi-twitter"></v-icon>
+                <div :class="{'text-red': is_count_over}">
+                  最初の投稿の文字カウント: 
+              {{char_count}} / 半角280
+              </div>
+            </v-chip>
+          </v-row>
+          
+          <v-timeline side="end">
+            <v-timeline-item v-for="tweet in composed">
+              <twitter-card :text=tweet></twitter-card>
+            </v-timeline-item>
+            <v-spacer></v-spacer>
+          </v-timeline>
+
+        </v-container>
+      </v-main>
+    </v-app>
+  </div>
+</body>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vuetify@3.1.0/dist/vuetify.min.js"></script>
+
+<script>
+  const { createApp } = Vue
+  const { createVuetify } = Vuetify
+  var expression = /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/gi;
+  var regex = new RegExp(expression);
+
+  const vuetify = createVuetify({
+    icons: {
+      defaultSet: 'mdi'
+    }
+  })
+
+  function tw_count(txt) {
+    let value = txt.replace(/\r\n/g, '\n')
+    blob = new Blob([value])
+    return (blob.size - [...value].length)/2 + [...value].length
+  }
+
+  function tw_substr_en(txt, start, target) {
+    let tw_lng = 0, end = start;
+    while (tw_lng < target) {
+      if (end+1 >= txt.length) { break };
+      end += 1;
+      tw_lng = tw_count(txt.substring(start,end))
+    }
+    return end
+  }
+
+  const app = createApp({
+    data() {
+      return {
+        dialog: false, 
+        first_tw_txt: "",
+        form_data: {
+          author: "", 
+          title: "",
+          abstract: "", 
+          content: "", 
+          url: ""
+        }
+      }
+    },
+    methods: {
+      clear() {
+        this.form_data = {
+          title: "",
+          author: this.form_data.author,
+          abstract: "",
+          content: "",
+          url: ""
+        }
+      },
+      focus_all() {
+        event.target.select()
+      }
+    },
+    computed: {
+      composed() {
+        // first tweet
+        let abst;
+        let start = 0, end = 0;
+        if (!this.form_data.abstract) {
+          let target = 257 - tw_count(this.form_data.title) - tw_count(this.form_data.author) - 11;
+          end = tw_substr_en(this.form_data.content, start, target)+1
+          abst = this.form_data.content.substring(0, end)
+          // prepare st, en for the next tweet
+          start = end;
+          end += 1;
+        } else {
+          abst = this.form_data.abstract;            
+        }
+        this.first_tw_txt = `${this.form_data.title}
+投稿者: ${this.form_data.author}
+${abst}
+`
+        // following tweets
+        let tweets = [`${this.first_tw_txt}${this.first_url}`];
+        const lng = this.form_data.content.length;
+        while (end<lng) {
+          end = tw_substr_en(this.form_data.content, start, 257)+1
+          tweets.push(this.form_data.content.substring(start,end).trim())
+          start = end;
+          end += 1;
+        }
+        return tweets
+      },
+      first_url() {
+        if (this.form_data.url) {
+          return this.form_data.url
+        } else {
+          urls = this.form_data.content.match(regex)
+          return urls ? urls[0] : '';
+        }
+      },
+      telegram_txt() {
+        return `${this.form_data.title}
+
+概要: ${this.form_data.abstract}
+
+URL: ${this.first_url}
+
+内容: ${this.form_data.content}`        
+      },
+      char_count() {
+        return tw_count(this.first_tw_txt.trim()) + 23 * (this.first_url.length > 0)
+      },
+      is_count_over() {
+        return this.char_count > 280
+      }
+    }
+  })
+
+  app.use(vuetify)
+  app.component('twitter-card', 
+    {
+      props: {
+        text: String,
+        url: String
+      },
+      template: `
+      <v-card 
+        variant="outlined"
+        max-width="430"
+        class="mx-auto rounded-lg elevation-4"
+      >
+      <v-card-item>
+        <template v-slot:prepend>
+          <v-avatar>
+            <v-img
+            src="http://hennohito.cocolog-nifty.com//blog/files/washira_flag.jpeg"
+            height="50px"/>
+          </v-avatar>              
+        </template>
+        <v-card-title>
+          <v-list-item-title>わしらがメディアじゃ</v-list-item-title>              
+        </v-card-title>
+        <v-card-title>
+          <v-list-item-subtitle>@washiraga・<a href="https://twitter.com/washiraga" class="text-decoration-none">フォローする</a></v-list-item-subtitle>
+        </v-card-title>
+      </v-card-item>
+
+        <v-card-text class="py-2">
+          <span style="white-space: pre-wrap;">
+            {{text}}
+            {{url}}
+          </span>
+        </v-card-text>
+        <v-card-text class="py-2">
+          午前7:50・2023年1月9日
+        </v-card-text>
+      </v-card>`
+    }
+  )
+  app.mount("#app");
+
+</script>
+</html>
